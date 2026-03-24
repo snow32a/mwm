@@ -5,6 +5,7 @@
 #include "freetype/freetype.h"
 #include <glib-2.0/glib.h>
 #include "fonts.h"
+#include "bitmaps.h"
 FT_Library ftlib;
 FT_Face curFace;
 typedef struct {
@@ -25,6 +26,7 @@ typedef struct {
 	char *title;
 	GC gc;
 	XImage *label;
+	XImage *labeli;
 	int textw, texth;
 	int left, top;
 	int src_left, src_top;
@@ -35,6 +37,9 @@ typedef struct {
 #define MAX_FRAMES 64
 FrameData frames[MAX_FRAMES];
 int nframes = 0;
+Display *dpy;
+Window root;
+XEvent ev;
 
 void InitFreetype() { FT_Init_FreeType(&ftlib); }
 void LoadFontFromPath(char *path) { FT_New_Face(ftlib, path, 0, &curFace); }
@@ -99,10 +104,39 @@ rgba *RenderRGBXText(char *text, int *w, int *h, rgb color) {
 	}
 	return buffer;
 }
+static inline void RenderFrameKF(Window wnd, int focusval){
+	for (int i = 0; i < nframes; i++) {
+		if (frames[i].frame == wnd) {
+			// render duh title
+			int textw;
+			int texth;
+			if (focusval == 1) {
+				XPutImage(dpy, frames[i].frame, frames[i].gc,
+						  frames[i].label, 0, 0,
+			  frames[i].width / 2 - frames[i].textw / 2, 10,
+			  frames[i].textw, frames[i].texth);
+			} else {
+				XPutImage(dpy, frames[i].frame, frames[i].gc,
+						  frames[i].labeli, 0, 0,
+			  frames[i].width / 2 - frames[i].textw / 2, 10,
+			  frames[i].textw, frames[i].texth);
+			}
+			XFlush(dpy);
+		}
+	}
+}
+static inline void RenderFrame(Window wnd){
+	Window focused;
+	int revert;
+	XGetInputFocus(dpy, &focused, &revert);
+			if(wnd == focused){
+				RenderFrameKF(wnd,1);
+			}else{
+				RenderFrameKF(wnd,0);
+			}
+
+}
 int main() {
-	Display *dpy;
-	Window root;
-	XEvent ev;
 	int screen;
 	dpy = XOpenDisplay(NULL);
 	screen = DefaultScreen(dpy);
@@ -152,13 +186,19 @@ int main() {
 			int textw, texth;
 			char *wndname;
 			XImage *labelimg;
+			XImage *labeliimg;
 			XFetchName(dpy, client, &wndname);
 			if (wndname) {
 				rgba *textbuf = RenderRGBXText(wndname, &textw, &texth,
 				                               (rgb){255, 255, 255});
 				labelimg = XCreateImage(
 				    dpy, DefaultVisual(dpy, screen), DefaultDepth(dpy, screen),
-				    ZPixmap, 0, (char *)textbuf, textw, texth, 32, 4 * textw);
+										ZPixmap, 0, (char *)textbuf, textw, texth, 32, 4 * textw);
+				rgba *textbufi = RenderRGBXText(wndname, &textw, &texth,
+											   (rgb){128, 128, 128});
+				labeliimg = XCreateImage(
+					dpy, DefaultVisual(dpy, screen), DefaultDepth(dpy, screen),
+										ZPixmap, 0, (char *)textbufi, textw, texth, 32, 4 * textw);
 			} else {
 				labelimg = NULL;
 			}
@@ -184,6 +224,7 @@ int main() {
 			                                wndname,
 			                                gc,
 			                                labelimg,
+											labeliimg,
 			                                textw,
 			                                texth,
 			                                640 - attr.width / 2,
@@ -194,54 +235,14 @@ int main() {
 			                                attr.height,
 			                                0};
 		}
-		if (ev.type == FocusIn || ev.type == FocusOut) {
-			for (int i = 0; i < nframes; i++) {
-					// render duh title
-					int textw;
-					int texth;
-					free(frames[i].label->data);
-					if (frames[i].client == ev.xfocus.window) {
-						frames[i].label->data = (char *)RenderRGBXText(
-							frames[i].title, &textw, &texth,
-							(rgb){255, 255, 255});
-					} else {
-						frames[i].label->data = (char *)RenderRGBXText(
-							frames[i].title, &textw, &texth,
-							(rgb){128, 128, 128});
-					}
-					XPutImage(dpy, frames[i].frame, frames[i].gc,
-							  frames[i].label, 0, 0,
-			   frames[i].width / 2 - frames[i].textw / 2, 10,
-			   frames[i].textw, frames[i].texth);
-					XFlush(dpy);
-			}
+		else if (ev.type == FocusIn) {
+			RenderFrameKF(ev.xfocus.window,1);
+		}
+		else if (ev.type == FocusOut) {
+			RenderFrameKF(ev.xfocus.window,0);
 		}
 		if (ev.type == Expose) {
-			Window focused;
-			int revert;
-			XGetInputFocus(dpy, &focused, &revert);
-			for (int i = 0; i < nframes; i++) {
-				if (frames[i].frame == ev.xexpose.window) {
-					// render duh title
-					int textw;
-					int texth;
-					free(frames[i].label->data);
-					if (frames[i].client == focused) {
-						frames[i].label->data = (char *)RenderRGBXText(
-						    frames[i].title, &textw, &texth,
-						    (rgb){255, 255, 255});
-					} else {
-						frames[i].label->data = (char *)RenderRGBXText(
-						    frames[i].title, &textw, &texth,
-						    (rgb){128, 128, 128});
-					}
-					XPutImage(dpy, frames[i].frame, frames[i].gc,
-					          frames[i].label, 0, 0,
-					          frames[i].width / 2 - frames[i].textw / 2, 10,
-					          frames[i].textw, frames[i].texth);
-					XFlush(dpy);
-				}
-			}
+			RenderFrame(ev.xfocus.window);
 		}
 		if (ev.type == ButtonRelease) {
 			for (int i = 0; i < nframes; i++) {
@@ -276,6 +277,7 @@ int main() {
 					}
 				} else if (frames[i].client == w) {
 					XRaiseWindow(dpy, frames[i].frame);
+					XSetInputFocus(dpy, frames[i].client, RevertToPointerRoot, CurrentTime);
 					printf("clicked client area\n");
 					XAllowEvents(dpy, ReplayPointer, CurrentTime);
 					XUngrabPointer(dpy, CurrentTime);
