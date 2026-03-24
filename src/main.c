@@ -6,6 +6,7 @@
 #include <glib-2.0/glib.h>
 #include "fonts.h"
 #include "bitmaps.h"
+#include <X11/Xutil.h>
 FT_Library ftlib;
 FT_Face curFace;
 typedef struct {
@@ -104,37 +105,38 @@ rgba *RenderRGBXText(char *text, int *w, int *h, rgb color) {
 	}
 	return buffer;
 }
-static inline void RenderFrameKF(Window wnd, int focusval){
+XImage* xbtn;
+static inline void RenderFrameKF(Window wnd, int focusval) {
 	for (int i = 0; i < nframes; i++) {
 		if (frames[i].frame == wnd) {
 			// render duh title
 			int textw;
 			int texth;
 			if (focusval == 1) {
-				XPutImage(dpy, frames[i].frame, frames[i].gc,
-						  frames[i].label, 0, 0,
-			  frames[i].width / 2 - frames[i].textw / 2, 10,
-			  frames[i].textw, frames[i].texth);
+				XPutImage(dpy, frames[i].frame, frames[i].gc, frames[i].label,
+				          0, 0, frames[i].width / 2 - frames[i].textw / 2, 10,
+				          frames[i].textw, frames[i].texth);
 			} else {
-				XPutImage(dpy, frames[i].frame, frames[i].gc,
-						  frames[i].labeli, 0, 0,
-			  frames[i].width / 2 - frames[i].textw / 2, 10,
-			  frames[i].textw, frames[i].texth);
+				XPutImage(dpy, frames[i].frame, frames[i].gc, frames[i].labeli,
+				          0, 0, frames[i].width / 2 - frames[i].textw / 2, 10,
+				          frames[i].textw, frames[i].texth);
 			}
+			XPutImage(dpy, frames[i].frame, frames[i].gc, xbtn,
+					  0, 0, 0, 0,
+			 xbtnicon_w, xbtnicon_h);
 			XFlush(dpy);
 		}
 	}
 }
-static inline void RenderFrame(Window wnd){
+static inline void RenderFrame(Window wnd) {
 	Window focused;
 	int revert;
 	XGetInputFocus(dpy, &focused, &revert);
-			if(wnd == focused){
-				RenderFrameKF(wnd,1);
-			}else{
-				RenderFrameKF(wnd,0);
-			}
-
+	if (wnd == focused) {
+		RenderFrameKF(wnd, 1);
+	} else {
+		RenderFrameKF(wnd, 0);
+	}
 }
 int main() {
 	int screen;
@@ -155,6 +157,12 @@ int main() {
 
 	XSelectInput(dpy, root, SubstructureRedirectMask | SubstructureNotifyMask);
 
+	xbtn = XCreateImage(dpy, DefaultVisual(dpy, screen), DefaultDepth(dpy,screen),
+						ZPixmap, 0, (char *)xbtnicon,
+						xbtnicon_w, xbtnicon_h,
+					 32,
+		   ((xbtnicon_w))*4);
+
 	while (1) {
 		XNextEvent(dpy, &ev);
 		printf("Event: %d\n", ev.type);
@@ -170,8 +178,7 @@ int main() {
 			wc.sibling = e->above;
 			wc.stack_mode = e->detail;
 			XConfigureWindow(dpy, e->window, e->value_mask, &wc);
-		}
-		if (ev.type == MapRequest) {
+		} else if (ev.type == MapRequest) {
 			Window client = ev.xmaprequest.window;
 
 			XWindowAttributes attr;
@@ -193,12 +200,12 @@ int main() {
 				                               (rgb){255, 255, 255});
 				labelimg = XCreateImage(
 				    dpy, DefaultVisual(dpy, screen), DefaultDepth(dpy, screen),
-										ZPixmap, 0, (char *)textbuf, textw, texth, 32, 4 * textw);
+				    ZPixmap, 0, (char *)textbuf, textw, texth, 32, 4 * textw);
 				rgba *textbufi = RenderRGBXText(wndname, &textw, &texth,
-											   (rgb){128, 128, 128});
+				                                (rgb){128, 128, 128});
 				labeliimg = XCreateImage(
-					dpy, DefaultVisual(dpy, screen), DefaultDepth(dpy, screen),
-										ZPixmap, 0, (char *)textbufi, textw, texth, 32, 4 * textw);
+				    dpy, DefaultVisual(dpy, screen), DefaultDepth(dpy, screen),
+				    ZPixmap, 0, (char *)textbufi, textw, texth, 32, 4 * textw);
 			} else {
 				labelimg = NULL;
 			}
@@ -206,8 +213,7 @@ int main() {
 			             SubstructureRedirectMask | SubstructureNotifyMask |
 			                 ButtonPressMask | ExposureMask |
 			                 PointerMotionMask | FocusChangeMask);
-			XSelectInput(dpy, client,
-						 FocusChangeMask);
+			XSelectInput(dpy, client, FocusChangeMask | PropertyChangeMask);
 
 			// reparent client into frame
 			XReparentWindow(dpy, client, frame, 5, 29);
@@ -224,7 +230,7 @@ int main() {
 			                                wndname,
 			                                gc,
 			                                labelimg,
-											labeliimg,
+			                                labeliimg,
 			                                textw,
 			                                texth,
 			                                640 - attr.width / 2,
@@ -234,12 +240,10 @@ int main() {
 			                                attr.width,
 			                                attr.height,
 			                                0};
-		}
-		else if (ev.type == FocusIn) {
-			RenderFrameKF(ev.xfocus.window,1);
-		}
-		else if (ev.type == FocusOut) {
-			RenderFrameKF(ev.xfocus.window,0);
+		} else if (ev.type == FocusIn) {
+			RenderFrameKF(ev.xfocus.window, 1);
+		} else if (ev.type == FocusOut) {
+			RenderFrameKF(ev.xfocus.window, 0);
 		}
 		if (ev.type == Expose) {
 			RenderFrame(ev.xfocus.window);
@@ -252,8 +256,7 @@ int main() {
 					break;
 				}
 			}
-		}
-		if (ev.type == ButtonPress) {
+		} else if (ev.type == ButtonPress) {
 			Window w = ev.xbutton.window;
 			for (int i = 0; i < nframes; i++) {
 				if (frames[i].beingDragged == 1) {
@@ -261,7 +264,8 @@ int main() {
 				}
 				if (frames[i].frame == w) {
 					XRaiseWindow(dpy, frames[i].frame);
-					XSetInputFocus(dpy, frames[i].client, RevertToPointerRoot, CurrentTime);
+					XSetInputFocus(dpy, frames[i].client, RevertToPointerRoot,
+					               CurrentTime);
 					if (ev.xbutton.y <= 29) {
 						XGrabPointer(dpy, root, True,
 						             PointerMotionMask | ButtonReleaseMask,
@@ -277,70 +281,87 @@ int main() {
 					}
 				} else if (frames[i].client == w) {
 					XRaiseWindow(dpy, frames[i].frame);
-					XSetInputFocus(dpy, frames[i].client, RevertToPointerRoot, CurrentTime);
+					XSetInputFocus(dpy, frames[i].client, RevertToPointerRoot,
+					               CurrentTime);
 					printf("clicked client area\n");
 					XAllowEvents(dpy, ReplayPointer, CurrentTime);
 					XUngrabPointer(dpy, CurrentTime);
 				}
 			}
-		}
-		if (ev.type == MotionNotify) {
+		} else if (ev.type == MotionNotify) {
 			if (ev.xmotion.state & Button1Mask) {
 
 				for (int i = 0; i < nframes; i++) {
 					if (frames[i].beingDragged == 1) {
+						if((ev.xmotion.x_root - frames[i].src_left>=0) || (ev.xmotion.y_root - frames[i].src_top>=0)){
 						XMoveWindow(dpy, frames[i].frame,
 						            ev.xmotion.x_root - frames[i].src_left,
 						            ev.xmotion.y_root - frames[i].src_top);
 						frames[i].left = ev.xmotion.x_root - frames[i].src_left;
 						frames[i].top = ev.xmotion.y_root - frames[i].src_top;
+						}
 					}
 				}
 			}
-		}
-		if (ev.type == ConfigureRequest) {
-			XConfigureRequestEvent *e = &ev.xconfigurerequest;
-
-			int frame_idx = -1;
-			for (int i = 0; i < nframes; i++) {
-				Window parent, root_ret, *children;
-				unsigned int nc;
-				XQueryTree(dpy, e->window, &root_ret, &parent, &children,
-				           &nc); // i stole this qwq
-				if (children)
-					XFree(children);
-				if (parent == frames[i].frame) {
-					frame_idx = i;
-					break;
+		} if (ev.type == PropertyNotify) {
+			if (ev.xproperty.atom == XInternAtom(dpy, "WM_NAME", False)) {
+				XImage *labelimg;
+				XImage *labeliimg;
+				int textw;
+				int texth;
+				char *wndname;
+				XFetchName(dpy,ev.xproperty.window,&wndname);
+				rgba *textbuf = RenderRGBXText(wndname, &textw, &texth,
+				                               (rgb){255, 255, 255});
+				labelimg = XCreateImage(
+				    dpy, DefaultVisual(dpy, screen), DefaultDepth(dpy, screen),
+				    ZPixmap, 0, (char *)textbuf, textw, texth, 32, 4 * textw);
+				rgba *textbufi = RenderRGBXText(wndname, &textw, &texth,
+				                                (rgb){128, 128, 128});
+				labeliimg = XCreateImage(
+				    dpy, DefaultVisual(dpy, screen), DefaultDepth(dpy, screen),
+				    ZPixmap, 0, (char *)textbufi, textw, texth, 32, 4 * textw);
+				for (int i = 0; i < nframes; i++) {
+					FrameData frame = frames[i];
+					if (frame.client == ev.xproperty.window) {
+						frame.title = wndname;
+						frame.label = labelimg;
+						frame.labeli = labeliimg;
+					}
 				}
 			}
 
-			if (frame_idx >= 0) {
-				if (e->value_mask & (CWX | CWY)) {
-					XMoveWindow(dpy, frames[frame_idx].frame, e->x, e->y);
+		} if (ev.type == PropertyNotify) {
+			if (ev.xproperty.atom == XInternAtom(dpy, "WM_NAME", False)) {
+				char *wndname = NULL;
+				int frame_idx = -1;
+				for (int i = 0; i < nframes; i++) {
+					if (frames[i].client == ev.xproperty.window) {
+						frame_idx = i;
+						break;
+					}
 				}
-				if (e->value_mask & (CWWidth | CWHeight)) {
-					XResizeWindow(dpy, frames[frame_idx].frame, e->width,
-					              e->height);
-				}
-				XMoveWindow(dpy, e->window, 5, 29);
-				XWindowChanges wc = {.width = e->width - 10,
-				                     .height = e->height - 29 - 5,
-				                     .border_width = e->border_width};
-				XConfigureWindow(dpy, e->window, e->value_mask & ~(CWX | CWY),
-				                 &wc);
-			} else {
-				XWindowChanges wc = {.x = e->x,
-				                     .y = e->y,
-				                     .width = e->width,
-				                     .height = e->height,
-				                     .border_width = e->border_width,
-				                     .sibling = e->above,
-				                     .stack_mode = e->detail};
-				XConfigureWindow(dpy, e->window, e->value_mask, &wc);
-			}
-		}
-		if (ev.type == UnmapNotify) {
+				if (frame_idx < 0) break;
+
+				XFetchName(dpy, ev.xproperty.window, &wndname);
+				if (!wndname) break;
+
+				int textw, texth;
+				rgba *textbuf = RenderRGBXText(wndname, &textw, &texth, (rgb){255, 255, 255});
+				XImage *labelimg = XCreateImage(dpy, DefaultVisual(dpy, screen),
+												DefaultDepth(dpy, screen), ZPixmap, 0, (char *)textbuf, textw, texth, 32, 4 * textw);
+				rgba *textbufi = RenderRGBXText(wndname, &textw, &texth, (rgb){128, 128, 128});
+				XImage *labeliimg = XCreateImage(dpy, DefaultVisual(dpy, screen),
+												 DefaultDepth(dpy, screen), ZPixmap, 0, (char *)textbufi, textw, texth, 32, 4 * textw);
+
+				XDestroyImage(frames[frame_idx].label);
+				XDestroyImage(frames[frame_idx].labeli);
+				frames[frame_idx].label = labelimg;
+				frames[frame_idx].labeli = labeliimg;
+				frames[frame_idx].title = wndname;
+				frames[frame_idx].textw = textw;
+				frames[frame_idx].texth = texth;
+			}} if (ev.type == UnmapNotify) {
 			for (int i = 0; i < nframes; i++) {
 				if (frames[i].client == ev.xunmap.window) {
 					XDestroyWindow(dpy, frames[i].frame);
