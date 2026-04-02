@@ -1,5 +1,6 @@
 #include <X11/X.h>
 #include <X11/Xlib.h>
+#include <X11/Xatom.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "freetype/freetype.h"
@@ -36,9 +37,18 @@ typedef struct {
 } FrameData;
 
 #define MAX_FRAMES 64
+const unsigned int TitlebarHeight = 29;
 FrameData frames[MAX_FRAMES];
 int nframes = 0;
 Display *dpy;
+Atom _NET_WM_WINDOW_TYPE;
+Atom _NET_WM_WINDOW_TYPE_DOCK;
+Atom _NET_WM_WINDOW_TYPE_DESKTOP;
+Atom _NET_WM_WINDOW_TYPE_MENU;
+Atom _NET_WM_STATE;
+Atom _NET_WM_STATE_STICKY;
+Atom _NET_WM_STRUT;
+Atom _NET_WM_STRUT_PARTIAL;
 Window root;
 XEvent ev;
 
@@ -105,13 +115,33 @@ rgba *RenderRGBXText(char *text, int *w, int *h, rgb color) {
 	}
 	return buffer;
 }
-XImage* xbtn;
+XImage *xbtn;
+static inline void RenderDecorButtons(FrameData frame, int clsstat){
+	XColor color;
+	color.red = 65536/8;
+	color.green = 65536/8;
+	color.blue = 65536/8;
+	XAllocColor(dpy, DefaultColormap(dpy, DefaultScreen(dpy)), &color);
+
+
+	if(clsstat){
+		XSetForeground(dpy, frame.gc, color.pixel);
+	}else{
+		XSetForeground(dpy, frame.gc, 0x000a0b11);
+	}
+	XFillRectangle(dpy, frame.frame, frame.gc, frame.width+10 - TitlebarHeight, 0, TitlebarHeight, TitlebarHeight);
+	XPutImage(dpy, frame.frame, frame.gc, xbtn, 0, 0,
+			  frame.width - (TitlebarHeight - xbtnicon_h) / 2,
+			  (TitlebarHeight - xbtnicon_h) / 2, xbtnicon_w,
+			  xbtnicon_h);
+}
 static inline void RenderFrameKF(Window wnd, int focusval) {
 	for (int i = 0; i < nframes; i++) {
 		if (frames[i].frame == wnd) {
 			// render duh title
 			int textw;
 			int texth;
+			if(frames[i].title){
 			if (focusval == 1) {
 				XPutImage(dpy, frames[i].frame, frames[i].gc, frames[i].label,
 				          0, 0, frames[i].width / 2 - frames[i].textw / 2, 10,
@@ -121,9 +151,8 @@ static inline void RenderFrameKF(Window wnd, int focusval) {
 				          0, 0, frames[i].width / 2 - frames[i].textw / 2, 10,
 				          frames[i].textw, frames[i].texth);
 			}
-			XPutImage(dpy, frames[i].frame, frames[i].gc, xbtn,
-					  0, 0, 0, 0,
-			 xbtnicon_w, xbtnicon_h);
+			}
+			RenderDecorButtons(frames[i],0);
 			XFlush(dpy);
 		}
 	}
@@ -138,15 +167,81 @@ static inline void RenderFrame(Window wnd) {
 		RenderFrameKF(wnd, 0);
 	}
 }
+int IsDockWindow(Window w) {
+	Atom actual_type;
+	int actual_format;
+	unsigned long nitems, bytes_after;
+	Atom *prop = NULL;
+
+	if (XGetWindowProperty(dpy, w, _NET_WM_WINDOW_TYPE, 0, 1024, False,
+		XA_ATOM, &actual_type, &actual_format,
+		&nitems, &bytes_after, (unsigned char**)&prop) == Success) {
+		for (unsigned long i = 0; i < nitems; i++) {
+			if (prop[i] == _NET_WM_WINDOW_TYPE_DOCK) {
+				XFree(prop);
+				return 1;
+			}
+		}
+		XFree(prop);
+		}
+		return 0;
+}
+int IsMenuWindow(Window w) {
+	Atom actual_type;
+	int actual_format;
+	unsigned long nitems, bytes_after;
+	Atom *prop = NULL;
+
+	if (XGetWindowProperty(dpy, w, _NET_WM_WINDOW_TYPE, 0, 1024, False,
+		XA_ATOM, &actual_type, &actual_format,
+		&nitems, &bytes_after, (unsigned char**)&prop) == Success) {
+		for (unsigned long i = 0; i < nitems; i++) {
+			if (prop[i] == _NET_WM_WINDOW_TYPE_MENU) {
+				XFree(prop);
+				return 1;
+			}
+		}
+		XFree(prop);
+		}
+		return 0;
+}
+int IsDskWindow(Window w) {
+	Atom actual_type;
+	int actual_format;
+	unsigned long nitems, bytes_after;
+	Atom *prop = NULL;
+
+	if (XGetWindowProperty(dpy, w, _NET_WM_WINDOW_TYPE, 0, 1024, False,
+		XA_ATOM, &actual_type, &actual_format,
+		&nitems, &bytes_after, (unsigned char**)&prop) == Success) {
+		for (unsigned long i = 0; i < nitems; i++) {
+			if (prop[i] == _NET_WM_WINDOW_TYPE_DESKTOP) {
+				XFree(prop);
+				return 1;
+			}
+		}
+		XFree(prop);
+		}
+		return 0;
+}
+int usableX;
+int usableY;
 int main() {
 	int screen;
 	dpy = XOpenDisplay(NULL);
-	screen = DefaultScreen(dpy);
 	if (!dpy) {
 		perror("XOpenDisplay");
 		exit(1);
 	}
-
+	screen = DefaultScreen(dpy);
+	_NET_WM_WINDOW_TYPE = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
+	_NET_WM_WINDOW_TYPE_DOCK = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DOCK", False);
+	_NET_WM_WINDOW_TYPE_DESKTOP = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DESKTOP", False);
+	_NET_WM_STATE = XInternAtom(dpy, "_NET_WM_STATE", False);
+	_NET_WM_STATE_STICKY = XInternAtom(dpy, "_NET_WM_STATE_STICKY", False);
+	_NET_WM_STRUT = XInternAtom(dpy, "_NET_WM_STRUT", False);
+	_NET_WM_STRUT_PARTIAL = XInternAtom(dpy, "_NET_WM_STRUT_PARTIAL", False);
+	_NET_WM_WINDOW_TYPE_MENU = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_MENU", False);
 	InitFreetype();
 	LoadFontFromBytes(URWGothic_Book, URWGothic_Book_Len);
 	SetFontSize(12);
@@ -157,12 +252,10 @@ int main() {
 
 	XSelectInput(dpy, root, SubstructureRedirectMask | SubstructureNotifyMask);
 
-	xbtn = XCreateImage(dpy, DefaultVisual(dpy, screen), DefaultDepth(dpy,screen),
-						ZPixmap, 0, (char *)xbtnicon,
-						xbtnicon_w, xbtnicon_h,
-					 32,
-		   ((xbtnicon_w))*4);
-
+	xbtn = XCreateImage(dpy, DefaultVisual(dpy, screen),
+	                    DefaultDepth(dpy, screen), ZPixmap, 0, (char *)xbtnicon,
+	                    xbtnicon_w, xbtnicon_h, 32, 0);
+	XSetErrorHandler((XErrorHandler)(int[]){0});
 	while (1) {
 		XNextEvent(dpy, &ev);
 		printf("Event: %d\n", ev.type);
@@ -183,6 +276,7 @@ int main() {
 
 			XWindowAttributes attr;
 			XGetWindowAttributes(dpy, client, &attr);
+			if(!(IsDockWindow(client) || IsMenuWindow(client) || IsDskWindow(client))){
 
 			// Create frame window
 			Window frame = XCreateSimpleWindow(
@@ -195,6 +289,7 @@ int main() {
 			XImage *labelimg;
 			XImage *labeliimg;
 			XFetchName(dpy, client, &wndname);
+
 			if (wndname) {
 				rgba *textbuf = RenderRGBXText(wndname, &textw, &texth,
 				                               (rgb){255, 255, 255});
@@ -211,8 +306,8 @@ int main() {
 			}
 			XSelectInput(dpy, frame,
 			             SubstructureRedirectMask | SubstructureNotifyMask |
-			                 ButtonPressMask | ExposureMask |
-			                 PointerMotionMask | FocusChangeMask);
+			                 ButtonPressMask | ButtonReleaseMask | ExposureMask |
+			                 PointerMotionMask | LeaveWindowMask| FocusChangeMask);
 			XSelectInput(dpy, client, FocusChangeMask | PropertyChangeMask);
 
 			// reparent client into frame
@@ -222,31 +317,45 @@ int main() {
 			            None);
 			// map both
 			XMapWindow(dpy, frame);
+			frames[nframes++] = (FrameData){frame,
+				client,
+				wndname,
+				gc,
+				labelimg,
+				labeliimg,
+				textw,
+				texth,
+				DisplayWidth(dpy, screen) - attr.width / 2,
+				DisplayHeight(dpy, screen) - attr.height / 2,
+				DisplayWidth(dpy, screen) - attr.width / 2,
+				DisplayHeight(dpy, screen) - attr.height / 2,
+				attr.width,
+				attr.height,
+				0};
+
+			}
 			XMapWindow(dpy, client);
 
 			XFlush(dpy);
-			frames[nframes++] = (FrameData){frame,
-			                                client,
-			                                wndname,
-			                                gc,
-			                                labelimg,
-			                                labeliimg,
-			                                textw,
-			                                texth,
-			                                640 - attr.width / 2,
-			                                400 - attr.height / 2,
-			                                640 - attr.width / 2,
-			                                400 - attr.height / 2,
-			                                attr.width,
-			                                attr.height,
-			                                0};
 		} else if (ev.type == FocusIn) {
 			RenderFrameKF(ev.xfocus.window, 1);
 		} else if (ev.type == FocusOut) {
+			if (ev.xfocus.mode == NotifyGrab || ev.xfocus.mode == NotifyUngrab)
+				continue;
+			if (ev.xfocus.detail == NotifyInferior  ||
+				ev.xfocus.detail == NotifyVirtual   ||
+				ev.xfocus.detail == NotifyNonlinearVirtual)
+				continue;
 			RenderFrameKF(ev.xfocus.window, 0);
+			for (int i = 0; i < nframes; i++) {
+				if (frames[i].client == ev.xfocus.window) {
+					RenderFrameKF(frames[i].frame, 0);
+					break;
+				}
+			}
 		}
 		if (ev.type == Expose) {
-			RenderFrame(ev.xfocus.window);
+			RenderFrame(ev.xexpose.window);
 		}
 		if (ev.type == ButtonRelease) {
 			for (int i = 0; i < nframes; i++) {
@@ -255,6 +364,43 @@ int main() {
 					XUngrabPointer(dpy, CurrentTime);
 					break;
 				}
+			}
+			for (int i = 0; i < nframes; i++) {
+				if (frames[i].frame == ev.xbutton.window &&
+					ev.xbutton.y < TitlebarHeight &&
+					ev.xbutton.x > frames[i].width - TitlebarHeight) {
+
+				Atom wm_protocols = XInternAtom(dpy, "WM_PROTOCOLS", False);
+				Atom wm_delete    = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
+
+				// check if client supports WM_DELETE_WINDOW
+				Atom *protocols;
+				int n;
+				int supports_delete = 0;
+				if (XGetWMProtocols(dpy, frames[i].client, &protocols, &n)) {
+					for (int j = 0; j < n; j++) {
+						if (protocols[j] == wm_delete) {
+							supports_delete = 1;
+							break;
+						}
+					}
+					XFree(protocols);
+				}
+
+				if (supports_delete) {
+					XEvent msg = {0};
+					msg.type                 = ClientMessage;
+					msg.xclient.window       = frames[i].client;
+					msg.xclient.message_type = wm_protocols;
+					msg.xclient.format       = 32;
+					msg.xclient.data.l[0]    = wm_delete;
+					msg.xclient.data.l[1]    = CurrentTime;
+					XSendEvent(dpy, frames[i].client, False, NoEventMask, &msg);
+				} else {
+					XKillClient(dpy, frames[i].client);
+				}
+				break;
+					}
 			}
 		} else if (ev.type == ButtonPress) {
 			Window w = ev.xbutton.window;
@@ -272,7 +418,7 @@ int main() {
 						             GrabModeAsync, GrabModeAsync, None, None,
 						             CurrentTime);
 						for (int i = 0; i < nframes; i++) {
-							if (frames[i].frame == ev.xbutton.window) {
+							if (frames[i].frame == ev.xbutton.window && (ev.xbutton.x<frames[i].width-TitlebarHeight || ev.xbutton.y>TitlebarHeight)) {
 								frames[i].src_left = ev.xbutton.x;
 								frames[i].src_top = ev.xbutton.y;
 								frames[i].beingDragged = 1;
@@ -280,7 +426,9 @@ int main() {
 						}
 					}
 				} else if (frames[i].client == w) {
+					if(!(IsDockWindow(frames[i].client) || IsDskWindow(frames[i].client))){
 					XRaiseWindow(dpy, frames[i].frame);
+					}
 					XSetInputFocus(dpy, frames[i].client, RevertToPointerRoot,
 					               CurrentTime);
 					printf("clicked client area\n");
@@ -289,49 +437,36 @@ int main() {
 				}
 			}
 		} else if (ev.type == MotionNotify) {
+			for (int i = 0; i < nframes; i++) {
 			if (ev.xmotion.state & Button1Mask) {
 
-				for (int i = 0; i < nframes; i++) {
 					if (frames[i].beingDragged == 1) {
-						if((ev.xmotion.x_root - frames[i].src_left>=0) || (ev.xmotion.y_root - frames[i].src_top>=0)){
-						XMoveWindow(dpy, frames[i].frame,
-						            ev.xmotion.x_root - frames[i].src_left,
-						            ev.xmotion.y_root - frames[i].src_top);
-						frames[i].left = ev.xmotion.x_root - frames[i].src_left;
-						frames[i].top = ev.xmotion.y_root - frames[i].src_top;
+						if ((ev.xmotion.x_root - frames[i].src_left >= 0) ||
+						    (ev.xmotion.y_root - frames[i].src_top >= 0)) {
+							XMoveWindow(dpy, frames[i].frame,
+							            ev.xmotion.x_root - frames[i].src_left,
+							            ev.xmotion.y_root - frames[i].src_top);
+							frames[i].left =
+							    ev.xmotion.x_root - frames[i].src_left;
+							frames[i].top =
+							    ev.xmotion.y_root - frames[i].src_top;
 						}
 					}
+			}else{
+				if(ev.xmotion.x>frames[i].width+10-TitlebarHeight && ev.xmotion.y <TitlebarHeight){
+					RenderDecorButtons(frames[i],1);
+				}else{
+					RenderDecorButtons(frames[i],0);
 				}
 			}
-		} if (ev.type == PropertyNotify) {
-			if (ev.xproperty.atom == XInternAtom(dpy, "WM_NAME", False)) {
-				XImage *labelimg;
-				XImage *labeliimg;
-				int textw;
-				int texth;
-				char *wndname;
-				XFetchName(dpy,ev.xproperty.window,&wndname);
-				rgba *textbuf = RenderRGBXText(wndname, &textw, &texth,
-				                               (rgb){255, 255, 255});
-				labelimg = XCreateImage(
-				    dpy, DefaultVisual(dpy, screen), DefaultDepth(dpy, screen),
-				    ZPixmap, 0, (char *)textbuf, textw, texth, 32, 4 * textw);
-				rgba *textbufi = RenderRGBXText(wndname, &textw, &texth,
-				                                (rgb){128, 128, 128});
-				labeliimg = XCreateImage(
-				    dpy, DefaultVisual(dpy, screen), DefaultDepth(dpy, screen),
-				    ZPixmap, 0, (char *)textbufi, textw, texth, 32, 4 * textw);
-				for (int i = 0; i < nframes; i++) {
-					FrameData frame = frames[i];
-					if (frame.client == ev.xproperty.window) {
-						frame.title = wndname;
-						frame.label = labelimg;
-						frame.labeli = labeliimg;
-					}
-				}
 			}
-
-		} if (ev.type == PropertyNotify) {
+		}
+		else if (ev.type == LeaveNotify){
+			for (int i = 0; i < nframes; i++) {
+				RenderDecorButtons(frames[i],0);
+			}
+		}
+		if (ev.type == PropertyNotify) {
 			if (ev.xproperty.atom == XInternAtom(dpy, "WM_NAME", False)) {
 				char *wndname = NULL;
 				int frame_idx = -1;
@@ -341,18 +476,24 @@ int main() {
 						break;
 					}
 				}
-				if (frame_idx < 0) break;
+				if (frame_idx < 0)
+					continue;
 
 				XFetchName(dpy, ev.xproperty.window, &wndname);
-				if (!wndname) break;
+				if (!wndname)
+					continue;
 
 				int textw, texth;
-				rgba *textbuf = RenderRGBXText(wndname, &textw, &texth, (rgb){255, 255, 255});
-				XImage *labelimg = XCreateImage(dpy, DefaultVisual(dpy, screen),
-												DefaultDepth(dpy, screen), ZPixmap, 0, (char *)textbuf, textw, texth, 32, 4 * textw);
-				rgba *textbufi = RenderRGBXText(wndname, &textw, &texth, (rgb){128, 128, 128});
-				XImage *labeliimg = XCreateImage(dpy, DefaultVisual(dpy, screen),
-												 DefaultDepth(dpy, screen), ZPixmap, 0, (char *)textbufi, textw, texth, 32, 4 * textw);
+				rgba *textbuf = RenderRGBXText(wndname, &textw, &texth,
+				                               (rgb){255, 255, 255});
+				XImage *labelimg = XCreateImage(
+				    dpy, DefaultVisual(dpy, screen), DefaultDepth(dpy, screen),
+				    ZPixmap, 0, (char *)textbuf, textw, texth, 32, 4 * textw);
+				rgba *textbufi = RenderRGBXText(wndname, &textw, &texth,
+				                                (rgb){128, 128, 128});
+				XImage *labeliimg = XCreateImage(
+				    dpy, DefaultVisual(dpy, screen), DefaultDepth(dpy, screen),
+				    ZPixmap, 0, (char *)textbufi, textw, texth, 32, 4 * textw);
 
 				XDestroyImage(frames[frame_idx].label);
 				XDestroyImage(frames[frame_idx].labeli);
@@ -361,7 +502,9 @@ int main() {
 				frames[frame_idx].title = wndname;
 				frames[frame_idx].textw = textw;
 				frames[frame_idx].texth = texth;
-			}} if (ev.type == UnmapNotify) {
+			}
+		}
+		if (ev.type == UnmapNotify) {
 			for (int i = 0; i < nframes; i++) {
 				if (frames[i].client == ev.xunmap.window) {
 					XDestroyWindow(dpy, frames[i].frame);
